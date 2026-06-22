@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Photo Viewer</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: -apple-system, system-ui, sans-serif; margin: 0; background: #15161a; color: #e8e8ea; }
+  header { padding: 1rem 1.5rem; border-bottom: 1px solid #2a2c34; display: flex; align-items: baseline; gap: 1.5rem; }
+  header h1 { font-size: 1.25rem; margin: 0; }
+  .total { color: #9aa0aa; }
+  .start { margin-left: auto; background: #3a7afe; color: #fff; padding: .55rem 1.1rem; border-radius: 7px; text-decoration: none; font-weight: 600; }
+  .start.disabled { background: #3a3d47; color: #777; pointer-events: none; }
+  main { padding: 1.5rem; max-width: 920px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 2rem; }
+  th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid #2a2c34; }
+  th { color: #9aa0aa; font-weight: 500; font-size: .85rem; }
+  td.count { font-variant-numeric: tabular-nums; }
+  .path { font-family: ui-monospace, monospace; font-size: .85rem; color: #c4c8d0; word-break: break-all; }
+  button.danger { background: none; border: 1px solid #5a3236; color: #e88; border-radius: 5px; padding: .2rem .55rem; cursor: pointer; }
+  button.danger:hover { background: #3a2024; }
+  .panel { background: #1c1e25; border: 1px solid #2a2c34; border-radius: 10px; padding: 1rem 1.25rem; }
+  .panel h2 { margin: 0 0 .75rem; font-size: 1rem; }
+  .crumbs { font-family: ui-monospace, monospace; font-size: .82rem; color: #9aa0aa; margin-bottom: .6rem; word-break: break-all; }
+  .browser { max-height: 320px; overflow-y: auto; border: 1px solid #2a2c34; border-radius: 7px; }
+  .row { display: flex; align-items: center; gap: .5rem; padding: .4rem .6rem; cursor: pointer; border-bottom: 1px solid #23252d; }
+  .row:last-child { border-bottom: none; }
+  .row:hover { background: #262934; }
+  .row .ic { width: 1.1rem; text-align: center; opacity: .8; }
+  .row .meta { margin-left: auto; color: #7d818c; font-size: .78rem; }
+  .addbar { display: flex; gap: .6rem; align-items: center; margin-top: .9rem; }
+  .addbar input { flex: 1; background: #15161a; border: 1px solid #343742; color: #e8e8ea; border-radius: 6px; padding: .45rem .6rem; font-family: ui-monospace, monospace; font-size: .82rem; }
+  .addbar button { background: #2e7d46; border: none; color: #fff; border-radius: 6px; padding: .5rem .9rem; cursor: pointer; font-weight: 600; }
+  .empty { color: #7d818c; padding: .6rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Photo Viewer</h1>
+  <span class="total">{{ total_remaining }} photo{{ total_remaining|pluralize }} to review</span>
+  {% if total_remaining %}
+    <a class="start" href="{% url 'review' %}">Start reviewing →</a>
+  {% else %}
+    <a class="start disabled">Start reviewing →</a>
+  {% endif %}
+</header>
+<main>
+  <h2 style="font-size:1rem;color:#9aa0aa;">Folders queued</h2>
+  {% if folders %}
+  <table>
+    <thead><tr><th>Label / Path</th><th>Remaining</th><th></th></tr></thead>
+    <tbody>
+      {% for f in folders %}
+      <tr>
+        <td>
+          {% if f.obj.label %}<strong>{{ f.obj.label }}</strong><br>{% endif %}
+          <span class="path">{{ f.obj.path }}</span>
+        </td>
+        <td class="count">{{ f.remaining }}</td>
+        <td>
+          <form method="post" action="{% url 'delete_folder' f.obj.id %}" style="margin:0">
+            {% csrf_token %}
+            <button class="danger" type="submit">Remove</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">No folders yet. Pick one below.</p>
+  {% endif %}
+
+  <div class="panel">
+    <h2>Add a folder</h2>
+    <div class="crumbs" id="crumbs"></div>
+    <div class="browser" id="browser"></div>
+    <form class="addbar" method="post" action="{% url 'add_folder' %}">
+      {% csrf_token %}
+      <input type="text" name="path" id="pathInput" placeholder="/path/to/folder" autocomplete="off">
+      <input type="text" name="label" id="labelInput" placeholder="label (optional)" style="flex:0 0 180px">
+      <button type="submit">Add this folder</button>
+    </form>
+  </div>
+</main>
+
+<script>
+const browser = document.getElementById('browser');
+const crumbs = document.getElementById('crumbs');
+const pathInput = document.getElementById('pathInput');
+
+async function load(path) {
+  const url = '/api/browse' + (path ? ('?path=' + encodeURIComponent(path)) : '');
+  const res = await fetch(url);
+  if (!res.ok) { browser.innerHTML = '<div class="empty">Cannot open this folder.</div>'; return; }
+  const data = await res.json();
+  pathInput.value = data.path;
+  crumbs.textContent = data.path + '  ·  ' + data.photo_count + ' photo(s) here';
+  let html = '';
+  if (data.parent) {
+    html += `<div class="row" data-path="${esc(data.parent)}"><span class="ic">↩</span><span>.. (up)</span></div>`;
+  }
+  for (const d of data.dirs) {
+    html += `<div class="row" data-path="${esc(d.path)}"><span class="ic">📁</span><span>${esc(d.name)}</span></div>`;
+  }
+  if (!data.dirs.length) html += '<div class="empty">No subfolders.</div>';
+  browser.innerHTML = html;
+  for (const row of browser.querySelectorAll('.row')) {
+    row.addEventListener('click', () => load(row.dataset.path));
+  }
+}
+function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+load('');
+</script>
+</body>
+</html>

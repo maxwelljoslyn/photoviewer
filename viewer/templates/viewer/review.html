@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Review</title>
+{% csrf_token %}
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #0e0f12; color: #e8e8ea;
+    font-family: -apple-system, system-ui, sans-serif; overflow: hidden; }
+  #stage { position: absolute; inset: 0 0 36px 0; overflow: auto; display: grid; place-items: center; }
+  #stage img { display: block; image-rendering: auto; }
+  #bar { position: absolute; left: 0; right: 0; bottom: 0; height: 36px; display: flex;
+    align-items: center; gap: 1.2rem; padding: 0 1rem; background: #16171c;
+    border-top: 1px solid #26282f; font-size: .82rem; }
+  #bar .count { font-weight: 700; font-variant-numeric: tabular-nums; }
+  #bar .zoom { color: #9aa0aa; font-variant-numeric: tabular-nums; }
+  #bar .name { color: #7d818c; font-family: ui-monospace, monospace; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; max-width: 40vw; }
+  #bar .keys { margin-left: auto; color: #6b6f79; }
+  #bar .keys b { color: #aab; font-weight: 600; }
+  #flash { position: absolute; top: 1rem; left: 50%; transform: translateX(-50%);
+    padding: .4rem 1rem; border-radius: 999px; font-weight: 700; opacity: 0;
+    transition: opacity .12s; pointer-events: none; }
+  #flash.good { background: #1f6b38; color: #d8ffe2; opacity: 1; }
+  #flash.not_good { background: #7a2b30; color: #ffdede; opacity: 1; }
+  #flash.maybe { background: #7a6320; color: #fff2cc; opacity: 1; }
+  #flash.undo { background: #2e4a7a; color: #dde7ff; opacity: 1; }
+  #done { position: absolute; inset: 0; display: none; place-items: center; text-align: center; }
+  #done.show { display: grid; }
+  #done a { color: #6ea8ff; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="flash"></div>
+<div id="done">
+  <div>
+    <h1>All caught up 🎉</h1>
+    <p>No more photos to review.</p>
+    <p><a href="/">← Back to folders</a></p>
+  </div>
+</div>
+<div id="bar">
+  <span class="count" id="count">…</span>
+  <span class="zoom" id="zoom">100%</span>
+  <span class="name" id="name"></span>
+  <span class="keys"><b>G</b> good · <b>N</b> not good · <b>M</b> maybe · <b>U</b> undo ·
+    <b>0</b> fit · <b>Space</b> +25% · <b>J</b> 200%</span>
+</div>
+
+<script>
+const PRELOAD_AHEAD = 4;           // how many upcoming images to fetch+decode
+const csrftoken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+
+const stage = document.getElementById('stage');
+const countEl = document.getElementById('count');
+const zoomEl = document.getElementById('zoom');
+const nameEl = document.getElementById('name');
+const flashEl = document.getElementById('flash');
+const doneEl = document.getElementById('done');
+
+let queue = [];        // photo entries {path, name, folder, url}
+let index = 0;         // index of the currently displayed photo
+let zoom = 100;        // 100% == fit-to-viewport
+const cache = new Map(); // url -> HTMLImageElement (loaded & decoded)
+
+function preload(i) {
+  const item = queue[i];
+  if (!item || cache.has(item.url)) return;
+  const img = new Image();
+  img.src = item.url;
+  cache.set(item.url, img);
+  // Force decode so the eventual paint is instant.
+  if (img.decode) img.decode().catch(() => {});
+}
+
+function getImg(url) {
+  let img = cache.get(url);
+  if (!img) { img = new Image(); img.src = url; cache.set(url, img); }
+  return img;
+}
+
+function applyZoom() {
+  const img = stage.querySelector('img');
+  if (!img) return;
+  zoomEl.textContent = zoom + '%';
+  const nw = img.naturalWidth, nh = img.naturalHeight;
+  if (!nw || !nh) return;
+  const fit = Math.min(stage.clientWidth / nw, stage.clientHeight / nh);
+  const scale = fit * (zoom / 100);
+  img.style.width = (nw * scale) + 'px';
+  img.style.height = (nh * scale) + 'px';
+}
+
+function show() {
+  if (index >= queue.length) { showDone(); return; }
+  doneEl.classList.remove('show');
+  const item = queue[index];
+  const img = getImg(item.url);
+  zoom = 100;
+  const place = () => { applyZoom(); stage.scrollTo(0, 0); };
+  stage.replaceChildren(img);
+  if (img.complete && img.naturalWidth) place();
+  else img.addEventListener('load', place, { once: true });
+  countEl.textContent = (queue.length - index) + ' left';
+  nameEl.textContent = item.folder + ' / ' + item.name;
+  for (let k = 1; k <= PRELOAD_AHEAD; k++) preload(index + k);
+}
+
+function showDone() {
+  stage.replaceChildren();
+  countEl.textContent = '0 left';
+  nameEl.textContent = '';
+  doneEl.classList.add('show');
+}
+
+function flash(kind, text) {
+  flashEl.className = kind;
+  flashEl.textContent = text;
+  clearTimeout(flash._t);
+  flash._t = setTimeout(() => { flashEl.className = ''; }, 350);
+}
+
+async function rate(rating, label, kind) {
+  if (index >= queue.length) return;
+  const item = queue[index];
+  flash(kind, label);
+  index++;            // advance immediately for instant feel
+  show();
+  try {
+    const res = await fetch('/api/rate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+      body: JSON.stringify({ path: item.path, rating }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+  } catch (e) {
+    alert('Failed to move photo:\n' + e.message + '\n\nReloading queue.');
+    await loadQueue();
+  }
+}
+
+async function undo() {
+  const res = await fetch('/api/undo', {
+    method: 'POST', headers: { 'X-CSRFToken': csrftoken },
+  });
+  const data = await res.json();
+  if (!data.ok) { flash('undo', 'nothing to undo'); return; }
+  // Put the restored photo back at the current position and show it.
+  cache.delete(data.photo.url);
+  queue.splice(index, 0, data.photo);
+  flash('undo', 'undo');
+  show();
+}
+
+async function loadQueue() {
+  const res = await fetch('/api/photos');
+  const data = await res.json();
+  queue = data.photos;
+  index = 0;
+  cache.clear();
+  show();
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  switch (e.key.toLowerCase()) {
+    case 'g': e.preventDefault(); rate('good', 'GOOD', 'good'); break;
+    case 'n': e.preventDefault(); rate('not_good', 'NOT GOOD', 'not_good'); break;
+    case 'm': e.preventDefault(); rate('maybe', 'MAYBE', 'maybe'); break;
+    case 'u': e.preventDefault(); undo(); break;
+    case '0': e.preventDefault(); zoom = 100; applyZoom(); break;
+    case ' ': e.preventDefault(); zoom += 25; applyZoom(); break;
+    case 'j': e.preventDefault(); zoom = 200; applyZoom(); break;
+  }
+});
+
+window.addEventListener('resize', applyZoom);
+loadQueue();
+</script>
+</body>
+</html>
