@@ -79,6 +79,7 @@
 
 <script>
 const PRELOAD_AHEAD = 4;           // how many upcoming images to fetch+decode
+const KEEP_BEHIND = 1;             // already-seen images kept around for snappy undo
 const MIN_ZOOM = 100;              // 100% == fit-to-viewport; never go below fit
 const MAX_ZOOM = 1000;
 const csrftoken = document.querySelector('[name=csrfmiddlewaretoken]').value;
@@ -114,6 +115,24 @@ function getImg(url) {
   let img = cache.get(url);
   if (!img) { img = new Image(); img.src = url; cache.set(url, img); }
   return img;
+}
+
+// Evict everything outside the live window around `index`. Decoded full-res
+// images are huge (a 24MP photo is ~96 MB as RGBA regardless of JPEG size), so
+// without this the cache grows unbounded and exhausts memory after a few dozen
+// photos. Clearing `src` lets the browser release the decoded bitmap and cancel
+// any in-flight load immediately, rather than waiting on GC.
+function trimCache() {
+  const live = new Set();
+  for (let k = -KEEP_BEHIND; k <= PRELOAD_AHEAD; k++) {
+    const item = queue[index + k];
+    if (item) live.add(item.url);
+  }
+  for (const [url, img] of cache) {
+    if (live.has(url)) continue;
+    img.src = '';
+    cache.delete(url);
+  }
 }
 
 function applyZoom() {
@@ -157,6 +176,7 @@ function show() {
   nameEl.textContent = item.folder + ' / ' + item.name;
   updateExif(item);
   for (let k = 1; k <= PRELOAD_AHEAD; k++) preload(index + k);
+  trimCache();
 }
 
 function showDone() {
