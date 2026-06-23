@@ -30,6 +30,28 @@
   #done { position: absolute; inset: 0; display: none; place-items: center; text-align: center; }
   #done.show { display: grid; }
   #done a { color: #6ea8ff; }
+  #exif { position: absolute; left: 8px; bottom: 44px; width: 340px; max-width: 46vw;
+    background: rgba(18,19,24,.92); border: 1px solid #2b2d35; border-radius: 8px;
+    font-size: .72rem; box-shadow: 0 8px 24px rgba(0,0,0,.45); backdrop-filter: blur(3px); }
+  #exif-head { display: flex; align-items: center; gap: .4rem; padding: .35rem .55rem;
+    cursor: pointer; user-select: none; font-weight: 700; letter-spacing: .03em;
+    color: #c7ccd6; border-bottom: 1px solid #2b2d35; }
+  #exif-head .tw { color: #6b6f79; font-weight: 600; }
+  #exif-head .ct { margin-left: auto; color: #6b6f79; font-weight: 600;
+    font-variant-numeric: tabular-nums; }
+  #exif.collapsed #exif-head { border-bottom: none; }
+  #exif.collapsed #exif-body, #exif.collapsed #exif-loc { display: none; }
+  #exif-loc { padding: .4rem .55rem; border-bottom: 1px solid #2b2d35; }
+  #exif-loc:empty { display: none; }
+  #exif-loc a, #exif-loc span { color: #6ea8ff; text-decoration: none; }
+  #exif-loc a:hover { text-decoration: underline; }
+  #exif-body { max-height: 50vh; overflow: auto; }
+  #exif-body table { width: 100%; border-collapse: collapse; }
+  #exif-body td { padding: .14rem .55rem; vertical-align: top; border-top: 1px solid #1f2128;
+    font-family: ui-monospace, monospace; }
+  #exif-body td.k { color: #8b909b; white-space: nowrap; }
+  #exif-body td.v { color: #d7dbe2; word-break: break-word; }
+  #exif-body .empty { padding: .5rem .55rem; color: #6b6f79; }
 </style>
 </head>
 <body>
@@ -42,16 +64,23 @@
     <p><a href="/">← Back to folders</a></p>
   </div>
 </div>
+<div id="exif" class="collapsed">
+  <div id="exif-head"><span class="tw" id="exif-arrow">▸</span> EXIF <span class="ct" id="exif-count"></span></div>
+  <div id="exif-loc"></div>
+  <div id="exif-body"></div>
+</div>
 <div id="bar">
   <span class="count" id="count">…</span>
   <span class="zoom" id="zoom">100%</span>
   <span class="name" id="name"></span>
   <span class="keys"><b>G</b> good · <b>N</b> not good · <b>M</b> maybe · <b>U</b> undo ·
-    <b>0</b> fit · <b>Space</b> +25% · <b>J</b> 200%</span>
+    <b>0</b> fit · <b>Space</b> +25% · <b>J</b> +100% · <b>K</b> −100% · <b>I</b> exif</span>
 </div>
 
 <script>
 const PRELOAD_AHEAD = 4;           // how many upcoming images to fetch+decode
+const MIN_ZOOM = 100;              // 100% == fit-to-viewport; never go below fit
+const MAX_ZOOM = 1000;
 const csrftoken = document.querySelector('[name=csrfmiddlewaretoken]').value;
 
 const stage = document.getElementById('stage');
@@ -60,6 +89,11 @@ const zoomEl = document.getElementById('zoom');
 const nameEl = document.getElementById('name');
 const flashEl = document.getElementById('flash');
 const doneEl = document.getElementById('done');
+const exifEl = document.getElementById('exif');
+const exifArrow = document.getElementById('exif-arrow');
+const exifCount = document.getElementById('exif-count');
+const exifLoc = document.getElementById('exif-loc');
+const exifBody = document.getElementById('exif-body');
 
 let queue = [];        // photo entries {path, name, folder, url}
 let index = 0;         // index of the currently displayed photo
@@ -90,8 +124,23 @@ function applyZoom() {
   if (!nw || !nh) return;
   const fit = Math.min(stage.clientWidth / nw, stage.clientHeight / nh);
   const scale = fit * (zoom / 100);
+
+  // Record what fraction of the content sits at the viewport center, so we can
+  // keep that same point centered after resizing (zoom toward the center).
+  const fx = (stage.scrollLeft + stage.clientWidth / 2) / stage.scrollWidth;
+  const fy = (stage.scrollTop + stage.clientHeight / 2) / stage.scrollHeight;
+
   img.style.width = (nw * scale) + 'px';
   img.style.height = (nh * scale) + 'px';
+
+  // Reading scrollWidth/Height below forces layout with the new size applied.
+  stage.scrollLeft = fx * stage.scrollWidth - stage.clientWidth / 2;
+  stage.scrollTop = fy * stage.scrollHeight - stage.clientHeight / 2;
+}
+
+function setZoom(v) {
+  zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, v));
+  applyZoom();
 }
 
 function show() {
@@ -106,6 +155,7 @@ function show() {
   else img.addEventListener('load', place, { once: true });
   countEl.textContent = (queue.length - index) + ' left';
   nameEl.textContent = item.folder + ' / ' + item.name;
+  updateExif(item);
   for (let k = 1; k <= PRELOAD_AHEAD; k++) preload(index + k);
 }
 
@@ -113,8 +163,83 @@ function showDone() {
   stage.replaceChildren();
   countEl.textContent = '0 left';
   nameEl.textContent = '';
+  exifSeq++;
+  exifBody.replaceChildren();
+  exifCount.textContent = '';
   doneEl.classList.add('show');
 }
+
+// --- EXIF overlay ----------------------------------------------------------
+let exifSeq = 0;   // bumped per photo so stale fetch responses are discarded
+
+function setExifCollapsed(collapsed) {
+  exifEl.classList.toggle('collapsed', collapsed);
+  exifArrow.textContent = collapsed ? '▸' : '▾';
+  try { localStorage.setItem('exifCollapsed', collapsed ? '1' : '0'); } catch (e) {}
+}
+
+function toggleExif() {
+  setExifCollapsed(!exifEl.classList.contains('collapsed'));
+}
+
+function renderExif(data) {
+  const keys = Object.keys(data).sort((a, b) => a.localeCompare(b));
+  exifCount.textContent = keys.length ? keys.length + ' tags' : '';
+  if (!keys.length) {
+    exifBody.replaceChildren(Object.assign(document.createElement('div'),
+      { className: 'empty', textContent: 'No EXIF data.' }));
+    return;
+  }
+  const table = document.createElement('table');
+  for (const k of keys) {
+    let v = data[k];
+    if (Array.isArray(v)) v = v.join(', ');
+    else if (v && typeof v === 'object') v = JSON.stringify(v);
+    const tr = document.createElement('tr');
+    const tdk = document.createElement('td');
+    tdk.className = 'k'; tdk.textContent = k;
+    const tdv = document.createElement('td');
+    tdv.className = 'v'; tdv.textContent = (v === null || v === undefined) ? '—' : String(v);
+    tr.append(tdk, tdv);
+    table.append(tr);
+  }
+  exifBody.replaceChildren(table);
+}
+
+function renderLocation(loc, coords) {
+  exifLoc.replaceChildren();
+  if (!coords) return;
+  const label = '📍 ' + (loc || (coords.lat.toFixed(5) + ', ' + coords.lon.toFixed(5)));
+  const a = document.createElement('a');
+  a.textContent = label;
+  a.href = 'https://www.openstreetmap.org/?mlat=' + coords.lat + '&mlon=' + coords.lon + '#map=15/' + coords.lat + '/' + coords.lon;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  exifLoc.append(a);
+}
+
+async function updateExif(item) {
+  const seq = ++exifSeq;
+  exifCount.textContent = '';
+  exifLoc.replaceChildren();
+  exifBody.replaceChildren(Object.assign(document.createElement('div'),
+    { className: 'empty', textContent: 'Loading…' }));
+  try {
+    const res = await fetch('/api/exif?path=' + encodeURIComponent(item.path));
+    const data = await res.json();
+    if (seq !== exifSeq) return;   // a newer photo is already showing
+    renderLocation(data.location, data.coords);
+    renderExif(data.exif || {});
+  } catch (e) {
+    if (seq !== exifSeq) return;
+    exifBody.replaceChildren(Object.assign(document.createElement('div'),
+      { className: 'empty', textContent: 'Failed to load EXIF.' }));
+  }
+}
+
+document.getElementById('exif-head').addEventListener('click', toggleExif);
+try { setExifCollapsed(localStorage.getItem('exifCollapsed') !== '0'); }
+catch (e) { setExifCollapsed(true); }
 
 function flash(kind, text) {
   flashEl.className = kind;
@@ -164,16 +289,26 @@ async function loadQueue() {
   show();
 }
 
+const SCROLL_STEP = 120;   // pixels per arrow press
+
 document.addEventListener('keydown', (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
+  switch (e.key) {
+    case 'ArrowUp':    e.preventDefault(); stage.scrollBy(0, -SCROLL_STEP); return;
+    case 'ArrowDown':  e.preventDefault(); stage.scrollBy(0,  SCROLL_STEP); return;
+    case 'ArrowLeft':  e.preventDefault(); stage.scrollBy(-SCROLL_STEP, 0); return;
+    case 'ArrowRight': e.preventDefault(); stage.scrollBy( SCROLL_STEP, 0); return;
+  }
   switch (e.key.toLowerCase()) {
     case 'g': e.preventDefault(); rate('good', 'GOOD', 'good'); break;
     case 'n': e.preventDefault(); rate('not_good', 'NOT GOOD', 'not_good'); break;
     case 'm': e.preventDefault(); rate('maybe', 'MAYBE', 'maybe'); break;
     case 'u': e.preventDefault(); undo(); break;
-    case '0': e.preventDefault(); zoom = 100; applyZoom(); break;
-    case ' ': e.preventDefault(); zoom += 25; applyZoom(); break;
-    case 'j': e.preventDefault(); zoom = 200; applyZoom(); break;
+    case '0': e.preventDefault(); setZoom(100); break;
+    case ' ': e.preventDefault(); setZoom(zoom + 25); break;
+    case 'j': e.preventDefault(); setZoom(zoom + 100); break;
+    case 'k': e.preventDefault(); setZoom(zoom - 100); break;
+    case 'i': e.preventDefault(); toggleExif(); break;
   }
 });
 

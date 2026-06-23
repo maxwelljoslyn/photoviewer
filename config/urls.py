@@ -17,4 +17,5 @@ urlpatterns = [
     path("api/rate", views.rate, name="rate"),
     path("api/undo", views.undo, name="undo"),
     path("image", views.image, name="image"),
+    path("api/exif", views.exif, name="exif"),
 ]

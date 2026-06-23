@@ -10,12 +10,14 @@ from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 from . import photos
+from .exif import coordinates, describe_location, read_exif
 from .models import MoveLog, WorkFolder
 
 
 # ---------------------------------------------------------------------------
 # Folder ordering / queue construction
 # ---------------------------------------------------------------------------
+
 
 def _ordered_folders():
     """Folders in the order we work through them (oldest queued first)."""
@@ -45,6 +47,7 @@ def _build_queue() -> list[dict]:
 # Pages
 # ---------------------------------------------------------------------------
 
+
 def index(request):
     folders = []
     for f in WorkFolder.objects.order_by("-created_at"):
@@ -65,6 +68,7 @@ def review(request):
 # Folder management API
 # ---------------------------------------------------------------------------
 
+
 @require_POST
 def add_folder(request):
     path = (request.POST.get("path") or "").strip()
@@ -74,9 +78,7 @@ def add_folder(request):
     resolved = Path(path).expanduser()
     if not resolved.is_dir():
         return HttpResponseBadRequest("Not a directory: %s" % path)
-    WorkFolder.objects.get_or_create(
-        path=str(resolved), defaults={"label": label}
-    )
+    WorkFolder.objects.get_or_create(path=str(resolved), defaults={"label": label})
     return redirect("index")
 
 
@@ -86,10 +88,21 @@ def delete_folder(request, folder_id):
     return redirect("index")
 
 
+# Where the folder picker opens by default.
+DEFAULT_BROWSE_ROOT = Path(
+    "/Users/maxwelljoslyn/Pictures/All_Personal_Pictures/camera-pics-2023-onward"
+)
+
+
 def browse(request):
     """List subdirectories of a path for the folder-picker UI."""
     raw = request.GET.get("path", "")
-    here = Path(raw).expanduser() if raw else Path.home()
+    if raw:
+        here = Path(raw).expanduser()
+    elif DEFAULT_BROWSE_ROOT.is_dir():
+        here = DEFAULT_BROWSE_ROOT
+    else:
+        here = Path.home()
     here = here.resolve()
     if not here.is_dir():
         return JsonResponse({"error": "Not a directory"}, status=400)
@@ -115,6 +128,7 @@ def browse(request):
 # Review API
 # ---------------------------------------------------------------------------
 
+
 def photo_queue(request):
     queue = _build_queue()
     return JsonResponse({"photos": queue, "total": len(queue)})
@@ -129,6 +143,29 @@ def image(request):
     if not photos.is_within_known_folder(target) or not target.is_file():
         raise Http404("not found")
     return FileResponse(open(target, "rb"), content_type="image/jpeg")
+
+
+def exif(request):
+    """Return all EXIF metadata for a photo under a registered work folder."""
+    raw = request.GET.get("path", "")
+    if not raw:
+        raise Http404("no path")
+    target = Path(raw)
+    if not photos.is_within_known_folder(target) or not target.is_file():
+        raise Http404("not found")
+    try:
+        data = read_exif(target)
+    except Exception as e:  # corrupt/odd files shouldn't break the overlay
+        return JsonResponse({"exif": {}, "error": str(e)})
+    resp = {"exif": data}
+    coords = coordinates(data)
+    if coords:
+        resp["coords"] = {"lat": coords[0], "lon": coords[1]}
+        try:
+            resp["location"] = describe_location(*coords)
+        except Exception:
+            resp["location"] = None
+    return JsonResponse(resp)
 
 
 @require_POST

@@ -31,9 +31,24 @@ Then open http://localhost:8000.
    | `U`     | Undo the last move (works across restarts)   |
    | `0`     | Reset zoom to fit the whole photo            |
    | `Space` | Zoom in another 25%                           |
-   | `J`     | Zoom to 200%                                  |
+   | `J`     | Zoom in another 100%                          |
+   | `K`     | Zoom out 100% (never below fit)              |
+   | `I`     | Toggle the EXIF overlay (bottom-left)        |
+
+   Zoom is anchored to the center of the viewport — it expands around whatever
+   you're looking at. Arrow keys scroll the image.
 
    When zoomed in, scroll normally to pan; Shift-scroll pans horizontally.
+
+## EXIF overlay
+
+A minimizable panel at the bottom-left of `/review` shows the EXIF metadata for
+the current photo. Click its header (or press `I`) to expand/collapse it; the
+collapsed/expanded state is remembered between sessions. It currently dumps
+*every* tag the file carries (main IFD plus the Exif and GPS sub-IFDs) so you
+can decide which keys are worth keeping — narrowing the set is a later step.
+Metadata is read live from disk via `GET /api/exif?path=…` and is subject to the
+same "must live under a registered folder" guard as image serving.
 
 ## Notes
 
