@@ -1,23 +1,20 @@
 # Photo Viewer
 
-A fast, keyboard-driven photo culling tool. Runs locally on `localhost`, reads
-and moves your JPEGs in place on disk (nothing is copied or uploaded), and
-aggressively preloads upcoming images so each rating keypress paints instantly —
-no waiting on 20 MB files the way Preview makes you wait.
+A fast, keyboard-driven photo culling tool. Runs locally, reads and moves your JPEGs in place on disk, and aggressively preloads upcoming images so each rating keypress paints instantly.
 
 ## Run
 
 ```sh
 uv run python manage.py migrate      # first time only
-uv run python manage.py runserver
+uv run python manage.py runserver 9000
 ```
 
-Then open http://localhost:8000.
+Then open http://localhost:9000.
 
 ## Workflow
 
 1. On the home page, browse your disk and **add** one or more folders to review.
-   Folders are non-recursive — only JPEGs directly inside count.
+   Folders are non-recursive: only JPEGs directly inside count.
 2. Click **Start reviewing** (or just go to `/review`). It works through every
    queued folder automatically; you never pick files or IDs by hand.
 3. Rate with the keyboard. Rated photos are moved into a subdirectory of their
@@ -35,7 +32,7 @@ Then open http://localhost:8000.
    | `K`     | Zoom out 100% (never below fit)              |
    | `I`     | Toggle the EXIF overlay (bottom-left)        |
 
-   Zoom is anchored to the center of the viewport — it expands around whatever
+   Zoom is anchored to the center of the viewport so it expands around whatever
    you're looking at. Arrow keys scroll the image.
 
    When zoomed in, scroll normally to pan; Shift-scroll pans horizontally.
