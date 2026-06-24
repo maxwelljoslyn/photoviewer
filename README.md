@@ -42,10 +42,9 @@ Then open http://localhost:9000.
 A minimizable panel at the bottom-left of `/review` shows the EXIF metadata for
 the current photo. Click its header (or press `I`) to expand/collapse it; the
 collapsed/expanded state is remembered between sessions. It currently dumps
-*every* tag the file carries (main IFD plus the Exif and GPS sub-IFDs) so you
-can decide which keys are worth keeping — narrowing the set is a later step.
+*every* tag the file carries (main IFD plus the Exif and GPS sub-IFDs).
 Metadata is read live from disk via `GET /api/exif?path=…` and is subject to the
-same "must live under a registered folder" guard as image serving.
+same "must live under a registered folder" constraint as image serving.
 
 ## Notes
 
