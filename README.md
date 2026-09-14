@@ -37,6 +37,22 @@ Then open http://localhost:9000.
 
    When zoomed in, scroll normally to pan; Shift-scroll pans horizontally.
 
+## Browsing rated photos
+
+Each queued folder on the home page has **Browse** links for its `good/`,
+`maybe/` and `not good/` subfolders. They open the same viewer in browse mode
+(`/review?folder=<path>`): no rating, just flipping through the photos in
+filename order with the same preloading, zoom and EXIF overlay.
+
+| Key     | Action                                       |
+|---------|----------------------------------------------|
+| `←`/`→` | Previous / next photo                        |
+| `↑`/`↓` | Scroll the image                             |
+
+The other zoom/EXIF keys work as in review mode. Only folders inside a queued
+folder can be browsed, so keep a folder queued if you want to browse its
+results later.
+
 ## EXIF overlay
 
 A minimizable panel at the bottom-left of `/review` shows the EXIF metadata for

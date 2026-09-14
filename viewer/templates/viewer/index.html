@@ -16,6 +16,10 @@
   th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid #2a2c34; }
   th { color: #9aa0aa; font-weight: 500; font-size: .85rem; }
   td.count { font-variant-numeric: tabular-nums; }
+  td.browse { font-size: .85rem; white-space: nowrap; }
+  td.browse a { color: #6ea8ff; text-decoration: none; }
+  td.browse a:hover { text-decoration: underline; }
+  td.browse .none { color: #5d616b; }
   .path { font-family: ui-monospace, monospace; font-size: .85rem; color: #c4c8d0; word-break: break-all; }
   button.danger { background: none; border: 1px solid #5a3236; color: #e88; border-radius: 5px; padding: .2rem .55rem; cursor: pointer; }
   button.danger:hover { background: #3a2024; }
@@ -48,7 +52,7 @@
   <h2 style="font-size:1rem;color:#9aa0aa;">Folders queued</h2>
   {% if folders %}
   <table>
-    <thead><tr><th>Label / Path</th><th>Remaining</th><th></th></tr></thead>
+    <thead><tr><th>Label / Path</th><th>Remaining</th><th>Browse</th><th></th></tr></thead>
     <tbody>
       {% for f in folders %}
       <tr>
@@ -57,6 +61,11 @@
           <span class="path">{{ f.obj.path }}</span>
         </td>
         <td class="count">{{ f.remaining }}</td>
+        <td class="browse">
+          {% for b in f.browse %}
+            {% if b.count %}<a href="{% url 'review' %}?folder={{ b.path|urlencode }}">{{ b.name }} ({{ b.count }})</a>{% else %}<span class="none">{{ b.name }} (0)</span>{% endif %}{% if not forloop.last %} · {% endif %}
+          {% endfor %}
+        </td>
         <td>
           <form method="post" action="{% url 'delete_folder' f.obj.id %}" style="margin:0">
             {% csrf_token %}

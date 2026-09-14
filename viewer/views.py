@@ -25,11 +25,15 @@ def _ordered_folders():
 
 
 def _photo_entry(folder: WorkFolder, name: str) -> dict:
-    abspath = str(Path(folder.path) / name)
+    return _entry(Path(folder.path), name, folder.label or folder.path)
+
+
+def _entry(directory: Path, name: str, label: str) -> dict:
+    abspath = str(directory / name)
     return {
         "path": abspath,
         "name": name,
-        "folder": folder.label or folder.path,
+        "folder": label,
         "url": reverse("image") + "?path=" + quote(abspath),
     }
 
@@ -51,7 +55,13 @@ def _build_queue() -> list[dict]:
 def index(request):
     folders = []
     for f in WorkFolder.objects.order_by("-created_at"):
-        folders.append({"obj": f, "remaining": photos.count_photos(f.path)})
+        browse = []
+        for d in (photos.GOOD_DIR, photos.MAYBE_DIR, photos.NOT_GOOD_DIR):
+            sub = str(Path(f.path) / d)
+            browse.append({"name": d, "path": sub, "count": photos.count_photos(sub)})
+        folders.append(
+            {"obj": f, "remaining": photos.count_photos(f.path), "browse": browse}
+        )
     total = sum(f["remaining"] for f in folders)
     return render(
         request,
@@ -130,7 +140,16 @@ def browse(request):
 
 
 def photo_queue(request):
-    queue = _build_queue()
+    """The review queue, or with ?folder=<path> every photo in that one folder."""
+    raw = request.GET.get("folder", "")
+    if raw:
+        target = Path(raw)
+        if not photos.is_within_known_folder(target) or not target.is_dir():
+            raise Http404("not found")
+        label = target.parent.name + "/" + target.name
+        queue = [_entry(target, n, label) for n in photos.list_photos(str(target))]
+    else:
+        queue = _build_queue()
     return JsonResponse({"photos": queue, "total": len(queue)})
 
 

@@ -59,8 +59,8 @@
 <div id="flash"></div>
 <div id="done">
   <div>
-    <h1>All caught up 🎉</h1>
-    <p>No more photos to review.</p>
+    <h1 id="done-title">All caught up 🎉</h1>
+    <p id="done-text">No more photos to review.</p>
     <p><a href="/">← Back to folders</a></p>
   </div>
 </div>
@@ -73,13 +73,16 @@
   <span class="count" id="count">…</span>
   <span class="zoom" id="zoom">100%</span>
   <span class="name" id="name"></span>
-  <span class="keys"><b>G</b> good · <b>N</b> not good · <b>M</b> maybe · <b>U</b> undo ·
+  <span class="keys" id="keys"><b>G</b> good · <b>N</b> not good · <b>M</b> maybe · <b>U</b> undo ·
     <b>0</b> fit · <b>Space</b> +25% · <b>J</b> +100% · <b>K</b> −100% · <b>I</b> exif</span>
 </div>
 
 <script>
+// Browse mode (/review?folder=<path>): flip through one folder with ←/→, no rating.
+const BROWSE_FOLDER = new URLSearchParams(location.search).get('folder');
+const BROWSE = BROWSE_FOLDER !== null;
 const PRELOAD_AHEAD = 4;           // how many upcoming images to fetch+decode
-const KEEP_BEHIND = 1;             // already-seen images kept around for snappy undo
+const KEEP_BEHIND = BROWSE ? 2 : 1; // images behind kept around (for undo, or for stepping back)
 const MIN_ZOOM = 100;              // 100% == fit-to-viewport; never go below fit
 const MAX_ZOOM = 1000;
 const csrftoken = document.querySelector('[name=csrfmiddlewaretoken]').value;
@@ -172,16 +175,25 @@ function show() {
   stage.replaceChildren(img);
   if (img.complete && img.naturalWidth) place();
   else img.addEventListener('load', place, { once: true });
-  countEl.textContent = (queue.length - index) + ' left';
+  countEl.textContent = BROWSE ? (index + 1) + ' / ' + queue.length
+                               : (queue.length - index) + ' left';
   nameEl.textContent = item.folder + ' / ' + item.name;
   updateExif(item);
   for (let k = 1; k <= PRELOAD_AHEAD; k++) preload(index + k);
+  if (BROWSE) for (let k = 1; k <= KEEP_BEHIND; k++) preload(index - k);
   trimCache();
+}
+
+function step(delta) {
+  const next = Math.min(queue.length - 1, Math.max(0, index + delta));
+  if (next === index) return;
+  index = next;
+  show();
 }
 
 function showDone() {
   stage.replaceChildren();
-  countEl.textContent = '0 left';
+  countEl.textContent = BROWSE ? '0 / 0' : '0 left';
   nameEl.textContent = '';
   exifSeq++;
   exifBody.replaceChildren();
@@ -301,7 +313,13 @@ async function undo() {
 }
 
 async function loadQueue() {
-  const res = await fetch('/api/photos');
+  const url = BROWSE ? '/api/photos?folder=' + encodeURIComponent(BROWSE_FOLDER) : '/api/photos';
+  const res = await fetch(url);
+  if (!res.ok) {
+    queue = []; index = 0; cache.clear(); showDone();
+    document.getElementById('done-text').textContent = 'Cannot open this folder.';
+    return;
+  }
   const data = await res.json();
   queue = data.photos;
   index = 0;
@@ -313,17 +331,27 @@ const SCROLL_STEP = 120;   // pixels per arrow press
 
 document.addEventListener('keydown', (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (BROWSE) {
+    switch (e.key) {
+      case 'ArrowLeft':  e.preventDefault(); step(-1); return;
+      case 'ArrowRight': e.preventDefault(); step(1); return;
+    }
+  }
   switch (e.key) {
     case 'ArrowUp':    e.preventDefault(); stage.scrollBy(0, -SCROLL_STEP); return;
     case 'ArrowDown':  e.preventDefault(); stage.scrollBy(0,  SCROLL_STEP); return;
     case 'ArrowLeft':  e.preventDefault(); stage.scrollBy(-SCROLL_STEP, 0); return;
     case 'ArrowRight': e.preventDefault(); stage.scrollBy( SCROLL_STEP, 0); return;
   }
+  if (!BROWSE) {
+    switch (e.key.toLowerCase()) {
+      case 'g': e.preventDefault(); rate('good', 'GOOD', 'good'); return;
+      case 'n': e.preventDefault(); rate('not_good', 'NOT GOOD', 'not_good'); return;
+      case 'm': e.preventDefault(); rate('maybe', 'MAYBE', 'maybe'); return;
+      case 'u': e.preventDefault(); undo(); return;
+    }
+  }
   switch (e.key.toLowerCase()) {
-    case 'g': e.preventDefault(); rate('good', 'GOOD', 'good'); break;
-    case 'n': e.preventDefault(); rate('not_good', 'NOT GOOD', 'not_good'); break;
-    case 'm': e.preventDefault(); rate('maybe', 'MAYBE', 'maybe'); break;
-    case 'u': e.preventDefault(); undo(); break;
     case '0': e.preventDefault(); setZoom(100); break;
     case ' ': e.preventDefault(); setZoom(zoom + 25); break;
     case 'j': e.preventDefault(); setZoom(zoom + 100); break;
@@ -331,6 +359,14 @@ document.addEventListener('keydown', (e) => {
     case 'i': e.preventDefault(); toggleExif(); break;
   }
 });
+
+if (BROWSE) {
+  document.title = 'Browse';
+  document.getElementById('done-title').textContent = 'Empty folder';
+  document.getElementById('done-text').textContent = 'No photos in this folder.';
+  document.getElementById('keys').innerHTML = '<b>←</b> prev · <b>→</b> next · ' +
+    '<b>0</b> fit · <b>Space</b> +25% · <b>J</b> +100% · <b>K</b> −100% · <b>I</b> exif';
+}
 
 window.addEventListener('resize', applyZoom);
 loadQueue();
