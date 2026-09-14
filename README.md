@@ -46,8 +46,8 @@ filename order with the same preloading, zoom and EXIF overlay.
 
 | Key     | Action                                       |
 |---------|----------------------------------------------|
-| `←`/`→` | Previous / next photo                        |
-| `↑`/`↓` | Scroll the image                             |
+| `,`/`.` | Previous / next photo                        |
+| Arrows  | Scroll the image                             |
 | `S`     | Star / unstar the photo                      |
 | `T`     | Toggle the thumbnail strip                   |
 

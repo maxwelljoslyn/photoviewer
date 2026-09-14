@@ -98,7 +98,7 @@
 </div>
 
 <script>
-// Browse mode flips through photos with ←/→ instead of rating them:
+// Browse mode flips through photos with , and . instead of rating them:
 // /review?folder=<path> for one folder, /review?starred=1 for every starred photo.
 const PARAMS = new URLSearchParams(location.search);
 const BROWSE_FOLDER = PARAMS.get('folder');
@@ -460,8 +460,8 @@ document.addEventListener('keydown', (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (BROWSE) {
     switch (e.key) {
-      case 'ArrowLeft':  e.preventDefault(); step(-1); return;
-      case 'ArrowRight': e.preventDefault(); step(1); return;
+      case ',': e.preventDefault(); step(-1); return;
+      case '.': e.preventDefault(); step(1); return;
     }
   }
   switch (e.key) {
@@ -494,7 +494,7 @@ if (BROWSE) {
   document.getElementById('done-title').textContent = BROWSE_STARRED ? 'No stars yet' : 'Empty folder';
   document.getElementById('done-text').textContent =
     BROWSE_STARRED ? 'No starred photos.' : 'No photos in this folder.';
-  document.getElementById('keys').innerHTML = '<b>←</b> prev · <b>→</b> next · <b>S</b> star · ' +
+  document.getElementById('keys').innerHTML = '<b>,</b> prev · <b>.</b> next · <b>S</b> star · ' +
     '<b>T</b> strip · <b>0</b> fit · <b>Space</b> +25% · <b>J</b> +100% · <b>K</b> −100% · <b>I</b> exif';
   try { setStrip(localStorage.getItem('stripOn') !== '0'); }
   catch (e) { setStrip(true); }
