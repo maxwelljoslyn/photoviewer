@@ -15,6 +15,20 @@ class WorkFolder(models.Model):
         return self.label or self.path
 
 
+class Star(models.Model):
+    """A photo marked as a standout, independent of which rating folder it's in.
+
+    Keyed by absolute path. Rating and undo move files, so they carry the star
+    along to the new path.
+    """
+
+    path = models.CharField(max_length=1024, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.path
+
+
 class MoveLog(models.Model):
     """Record of a single rating action, used to power undo."""
 

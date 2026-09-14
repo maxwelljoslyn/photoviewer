@@ -20,6 +20,10 @@
   td.browse a { color: #6ea8ff; text-decoration: none; }
   td.browse a:hover { text-decoration: underline; }
   td.browse .none { color: #5d616b; }
+  .star-ct { color: #f5c542; }
+  .starred { color: #f5c542; text-decoration: none; font-weight: 600; }
+  a.starred:hover { text-decoration: underline; }
+  .starred.none { color: #5d616b; font-weight: 400; }
   .path { font-family: ui-monospace, monospace; font-size: .85rem; color: #c4c8d0; word-break: break-all; }
   button.danger { background: none; border: 1px solid #5a3236; color: #e88; border-radius: 5px; padding: .2rem .55rem; cursor: pointer; }
   button.danger:hover { background: #3a2024; }
@@ -42,6 +46,11 @@
 <header>
   <h1>Photo Viewer</h1>
   <span class="total">{{ total_remaining }} photo{{ total_remaining|pluralize }} to review</span>
+  {% if starred_count %}
+    <a class="starred" href="{% url 'review' %}?starred=1">★ Starred ({{ starred_count }})</a>
+  {% else %}
+    <span class="starred none">★ Starred (0)</span>
+  {% endif %}
   {% if total_remaining %}
     <a class="start" href="{% url 'review' %}">Start reviewing →</a>
   {% else %}
@@ -63,7 +72,7 @@
         <td class="count">{{ f.remaining }}</td>
         <td class="browse">
           {% for b in f.browse %}
-            {% if b.count %}<a href="{% url 'review' %}?folder={{ b.path|urlencode }}">{{ b.name }} ({{ b.count }})</a>{% else %}<span class="none">{{ b.name }} (0)</span>{% endif %}{% if not forloop.last %} · {% endif %}
+            {% if b.count %}<a href="{% url 'review' %}?folder={{ b.path|urlencode }}">{{ b.name }} ({{ b.count }}{% if b.stars %}, <span class="star-ct">★{{ b.stars }}</span>{% endif %})</a>{% else %}<span class="none">{{ b.name }} (0)</span>{% endif %}{% if not forloop.last %} · {% endif %}
           {% endfor %}
         </td>
         <td>

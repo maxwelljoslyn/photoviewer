@@ -16,6 +16,7 @@ urlpatterns = [
     path("api/photos", views.photo_queue, name="photo_queue"),
     path("api/rate", views.rate, name="rate"),
     path("api/undo", views.undo, name="undo"),
+    path("api/star", views.star, name="star"),
     path("image", views.image, name="image"),
     path("api/exif", views.exif, name="exif"),
 ]

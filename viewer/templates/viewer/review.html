@@ -16,6 +16,8 @@
     border-top: 1px solid #26282f; font-size: .82rem; }
   #bar .count { font-weight: 700; font-variant-numeric: tabular-nums; }
   #bar .zoom { color: #9aa0aa; font-variant-numeric: tabular-nums; }
+  #bar .star { color: #f5c542; font-weight: 700; }
+  #bar .star:empty { display: none; }
   #bar .name { color: #7d818c; font-family: ui-monospace, monospace; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap; max-width: 40vw; }
   #bar .keys { margin-left: auto; color: #6b6f79; }
@@ -27,6 +29,22 @@
   #flash.not_good { background: #7a2b30; color: #ffdede; opacity: 1; }
   #flash.maybe { background: #7a6320; color: #fff2cc; opacity: 1; }
   #flash.undo { background: #2e4a7a; color: #dde7ff; opacity: 1; }
+  #flash.star { background: #8a6a12; color: #fff4d0; opacity: 1; }
+  /* Browse-mode strip of thumbnails for the photos loaded around the current one. */
+  #strip { position: absolute; left: 0; right: 0; bottom: 36px; height: 84px; display: none;
+    align-items: center; justify-content: center; gap: 6px; background: #121318;
+    border-top: 1px solid #26282f; }
+  body.strip-on #strip { display: flex; }
+  body.strip-on #stage { bottom: 120px; }
+  body.strip-on #exif { bottom: 128px; }
+  .thumb { position: relative; height: 64px; min-width: 40px; border: 2px solid transparent;
+    border-radius: 4px; cursor: pointer; opacity: .6; overflow: hidden; }
+  .thumb:hover { opacity: .9; }
+  .thumb.current { border-color: #6ea8ff; opacity: 1; }
+  .thumb.pending { width: 96px; background: #1c1e25; }
+  .thumb canvas { display: block; height: 64px; width: auto; }
+  .thumb .s { position: absolute; top: 1px; right: 4px; color: #f5c542; font-size: .85rem;
+    text-shadow: 0 0 3px #000, 0 0 2px #000; }
   #done { position: absolute; inset: 0; display: none; place-items: center; text-align: center; }
   #done.show { display: grid; }
   #done a { color: #6ea8ff; }
@@ -69,18 +87,24 @@
   <div id="exif-loc"></div>
   <div id="exif-body"></div>
 </div>
+<div id="strip"></div>
 <div id="bar">
   <span class="count" id="count">…</span>
   <span class="zoom" id="zoom">100%</span>
+  <span class="star" id="star"></span>
   <span class="name" id="name"></span>
-  <span class="keys" id="keys"><b>G</b> good · <b>N</b> not good · <b>M</b> maybe · <b>U</b> undo ·
+  <span class="keys" id="keys"><b>G</b> good · <b>N</b> not good · <b>M</b> maybe · <b>U</b> undo · <b>S</b> star ·
     <b>0</b> fit · <b>Space</b> +25% · <b>J</b> +100% · <b>K</b> −100% · <b>I</b> exif</span>
 </div>
 
 <script>
-// Browse mode (/review?folder=<path>): flip through one folder with ←/→, no rating.
-const BROWSE_FOLDER = new URLSearchParams(location.search).get('folder');
-const BROWSE = BROWSE_FOLDER !== null;
+// Browse mode flips through photos with ←/→ instead of rating them:
+// /review?folder=<path> for one folder, /review?starred=1 for every starred photo.
+const PARAMS = new URLSearchParams(location.search);
+const BROWSE_FOLDER = PARAMS.get('folder');
+const BROWSE_STARRED = PARAMS.has('starred');
+const BROWSE = BROWSE_FOLDER !== null || BROWSE_STARRED;
+const THUMB_HEIGHT = 64;           // CSS px; matches .thumb canvas
 const PRELOAD_AHEAD = 4;           // how many upcoming images to fetch+decode
 const KEEP_BEHIND = BROWSE ? 2 : 1; // images behind kept around (for undo, or for stepping back)
 const MIN_ZOOM = 100;              // 100% == fit-to-viewport; never go below fit
@@ -90,6 +114,8 @@ const csrftoken = document.querySelector('[name=csrfmiddlewaretoken]').value;
 const stage = document.getElementById('stage');
 const countEl = document.getElementById('count');
 const zoomEl = document.getElementById('zoom');
+const starEl = document.getElementById('star');
+const stripEl = document.getElementById('strip');
 const nameEl = document.getElementById('name');
 const flashEl = document.getElementById('flash');
 const doneEl = document.getElementById('done');
@@ -99,25 +125,29 @@ const exifCount = document.getElementById('exif-count');
 const exifLoc = document.getElementById('exif-loc');
 const exifBody = document.getElementById('exif-body');
 
-let queue = [];        // photo entries {path, name, folder, url}
+let queue = [];        // photo entries {path, name, folder, starred, url}
 let index = 0;         // index of the currently displayed photo
 let zoom = 100;        // 100% == fit-to-viewport
 const cache = new Map(); // url -> HTMLImageElement (loaded & decoded)
+const thumbs = new Map(); // url -> small canvas drawn from the cached image
+
+function newImage(url) {
+  const img = new Image();
+  img.src = url;
+  cache.set(url, img);
+  // Force decode so the eventual paint is instant.
+  if (img.decode) img.decode().then(renderStrip, () => {});
+  return img;
+}
 
 function preload(i) {
   const item = queue[i];
   if (!item || cache.has(item.url)) return;
-  const img = new Image();
-  img.src = item.url;
-  cache.set(item.url, img);
-  // Force decode so the eventual paint is instant.
-  if (img.decode) img.decode().catch(() => {});
+  newImage(item.url);
 }
 
 function getImg(url) {
-  let img = cache.get(url);
-  if (!img) { img = new Image(); img.src = url; cache.set(url, img); }
-  return img;
+  return cache.get(url) || newImage(url);
 }
 
 // Evict everything outside the live window around `index`. Decoded full-res
@@ -135,7 +165,57 @@ function trimCache() {
     if (live.has(url)) continue;
     img.src = '';
     cache.delete(url);
+    thumbs.delete(url);
   }
+}
+
+// --- Thumbnail strip (browse mode) -------------------------------------------
+// Shows only the photos already in the preload window. Each thumbnail is drawn
+// once onto a small canvas, so it costs kilobytes rather than another decoded
+// full-res bitmap.
+let stripOn = false;
+
+function thumbFor(item) {
+  if (thumbs.has(item.url)) return thumbs.get(item.url);
+  const img = cache.get(item.url);
+  if (!img || !img.complete || !img.naturalWidth) return null;
+  const c = document.createElement('canvas');
+  c.height = Math.round(THUMB_HEIGHT * devicePixelRatio);
+  c.width = Math.round(img.naturalWidth * c.height / img.naturalHeight);
+  const ctx = c.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, 0, 0, c.width, c.height);
+  thumbs.set(item.url, c);
+  return c;
+}
+
+function renderStrip() {
+  if (!BROWSE || !stripOn) return;
+  const slots = [];
+  for (let k = -KEEP_BEHIND; k <= PRELOAD_AHEAD; k++) {
+    const i = index + k;
+    const item = queue[i];
+    if (!item) continue;
+    const el = document.createElement('div');
+    el.className = 'thumb' + (k === 0 ? ' current' : '');
+    el.title = item.name;
+    const c = thumbFor(item);
+    if (c) el.append(c); else el.classList.add('pending');
+    if (item.starred) {
+      el.append(Object.assign(document.createElement('span'), { className: 's', textContent: '★' }));
+    }
+    el.addEventListener('click', () => step(i - index));
+    slots.push(el);
+  }
+  stripEl.replaceChildren(...slots);
+}
+
+function setStrip(on) {
+  stripOn = BROWSE && on;
+  document.body.classList.toggle('strip-on', stripOn);
+  try { localStorage.setItem('stripOn', on ? '1' : '0'); } catch (e) {}
+  if (stripOn) renderStrip(); else stripEl.replaceChildren();
+  applyZoom();
 }
 
 function applyZoom() {
@@ -175,13 +255,24 @@ function show() {
   stage.replaceChildren(img);
   if (img.complete && img.naturalWidth) place();
   else img.addEventListener('load', place, { once: true });
-  countEl.textContent = BROWSE ? (index + 1) + ' / ' + queue.length
-                               : (queue.length - index) + ' left';
-  nameEl.textContent = item.folder + ' / ' + item.name;
+  updateBar();
   updateExif(item);
   for (let k = 1; k <= PRELOAD_AHEAD; k++) preload(index + k);
   if (BROWSE) for (let k = 1; k <= KEEP_BEHIND; k++) preload(index - k);
   trimCache();
+  renderStrip();
+}
+
+function updateBar() {
+  const item = queue[index];
+  if (BROWSE) {
+    const stars = queue.filter(p => p.starred).length;
+    countEl.textContent = (index + 1) + ' / ' + queue.length + (stars ? '  ★ ' + stars : '');
+  } else {
+    countEl.textContent = (queue.length - index) + ' left';
+  }
+  starEl.textContent = item.starred ? '★' : '';
+  nameEl.textContent = item.folder + ' / ' + item.name;
 }
 
 function step(delta) {
@@ -194,7 +285,9 @@ function step(delta) {
 function showDone() {
   stage.replaceChildren();
   countEl.textContent = BROWSE ? '0 / 0' : '0 left';
+  starEl.textContent = '';
   nameEl.textContent = '';
+  stripEl.replaceChildren();
   exifSeq++;
   exifBody.replaceChildren();
   exifCount.textContent = '';
@@ -280,6 +373,38 @@ function flash(kind, text) {
   flash._t = setTimeout(() => { flashEl.className = ''; }, 350);
 }
 
+// Server writes run one at a time in keypress order, so pressing S then G stars
+// the photo before the rating moves it.
+let serverChain = Promise.resolve();
+function serial(fn) {
+  const run = serverChain.then(fn);
+  serverChain = run.catch(() => {});
+  return run;
+}
+
+async function toggleStar() {
+  if (index >= queue.length) return;
+  const item = queue[index];
+  const starred = !item.starred;
+  item.starred = starred;
+  flash('star', starred ? '★ STARRED' : 'UNSTARRED');
+  updateBar();
+  renderStrip();
+  try {
+    const res = await serial(() => fetch('/api/star', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+      body: JSON.stringify({ path: item.path, starred }),
+    }));
+    if (!res.ok) throw new Error(await res.text());
+  } catch (e) {
+    item.starred = !starred;
+    if (queue[index] === item) updateBar();
+    renderStrip();
+    flash('not_good', 'star failed');
+  }
+}
+
 async function rate(rating, label, kind) {
   if (index >= queue.length) return;
   const item = queue[index];
@@ -287,11 +412,11 @@ async function rate(rating, label, kind) {
   index++;            // advance immediately for instant feel
   show();
   try {
-    const res = await fetch('/api/rate', {
+    const res = await serial(() => fetch('/api/rate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
       body: JSON.stringify({ path: item.path, rating }),
-    });
+    }));
     if (!res.ok) throw new Error(await res.text());
   } catch (e) {
     alert('Failed to move photo:\n' + e.message + '\n\nReloading queue.');
@@ -300,9 +425,9 @@ async function rate(rating, label, kind) {
 }
 
 async function undo() {
-  const res = await fetch('/api/undo', {
+  const res = await serial(() => fetch('/api/undo', {
     method: 'POST', headers: { 'X-CSRFToken': csrftoken },
-  });
+  }));
   const data = await res.json();
   if (!data.ok) { flash('undo', 'nothing to undo'); return; }
   // Put the restored photo back at the current position and show it.
@@ -313,7 +438,9 @@ async function undo() {
 }
 
 async function loadQueue() {
-  const url = BROWSE ? '/api/photos?folder=' + encodeURIComponent(BROWSE_FOLDER) : '/api/photos';
+  const url = BROWSE_STARRED ? '/api/photos?starred=1'
+    : BROWSE ? '/api/photos?folder=' + encodeURIComponent(BROWSE_FOLDER)
+    : '/api/photos';
   const res = await fetch(url);
   if (!res.ok) {
     queue = []; index = 0; cache.clear(); showDone();
@@ -357,15 +484,20 @@ document.addEventListener('keydown', (e) => {
     case 'j': e.preventDefault(); setZoom(zoom + 100); break;
     case 'k': e.preventDefault(); setZoom(zoom - 100); break;
     case 'i': e.preventDefault(); toggleExif(); break;
+    case 's': e.preventDefault(); toggleStar(); break;
+    case 't': if (BROWSE) { e.preventDefault(); setStrip(!stripOn); } break;
   }
 });
 
 if (BROWSE) {
-  document.title = 'Browse';
-  document.getElementById('done-title').textContent = 'Empty folder';
-  document.getElementById('done-text').textContent = 'No photos in this folder.';
-  document.getElementById('keys').innerHTML = '<b>←</b> prev · <b>→</b> next · ' +
-    '<b>0</b> fit · <b>Space</b> +25% · <b>J</b> +100% · <b>K</b> −100% · <b>I</b> exif';
+  document.title = BROWSE_STARRED ? 'Starred' : 'Browse';
+  document.getElementById('done-title').textContent = BROWSE_STARRED ? 'No stars yet' : 'Empty folder';
+  document.getElementById('done-text').textContent =
+    BROWSE_STARRED ? 'No starred photos.' : 'No photos in this folder.';
+  document.getElementById('keys').innerHTML = '<b>←</b> prev · <b>→</b> next · <b>S</b> star · ' +
+    '<b>T</b> strip · <b>0</b> fit · <b>Space</b> +25% · <b>J</b> +100% · <b>K</b> −100% · <b>I</b> exif';
+  try { setStrip(localStorage.getItem('stripOn') !== '0'); }
+  catch (e) { setStrip(true); }
 }
 
 window.addEventListener('resize', applyZoom);

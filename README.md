@@ -48,10 +48,29 @@ filename order with the same preloading, zoom and EXIF overlay.
 |---------|----------------------------------------------|
 | `←`/`→` | Previous / next photo                        |
 | `↑`/`↓` | Scroll the image                             |
+| `S`     | Star / unstar the photo                      |
+| `T`     | Toggle the thumbnail strip                   |
 
 The other zoom/EXIF keys work as in review mode. Only folders inside a queued
 folder can be browsed, so keep a folder queued if you want to browse its
 results later.
+
+The thumbnail strip above the status bar shows the photos currently loaded in
+memory around the current one (2 behind, 4 ahead); click one to jump to it.
+Its on/off state is remembered between sessions.
+
+## Stars
+
+Stars mark standouts independently of rating: `S` works in review mode and
+browse mode, on a photo in any folder. Use them to pick the handful worth
+posting out of a `good/` folder, or to flag a `maybe/` or `not good/` photo for
+a second look. A star stays with its photo when rating or undo moves the file
+(moves made outside the app lose the star).
+
+The home page shows a **★ Starred** link that browses every starred photo
+across all folders, and each browse link shows how many of its photos are
+starred. Stars live in SQLite alongside the move log, so run `migrate` after
+pulling this change.
 
 ## EXIF overlay
 
