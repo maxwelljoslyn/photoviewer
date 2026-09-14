@@ -256,6 +256,7 @@ function show() {
   if (img.complete && img.naturalWidth) place();
   else img.addEventListener('load', place, { once: true });
   updateBar();
+  if (BROWSE) rememberPlace(item);
   updateExif(item);
   for (let k = 1; k <= PRELOAD_AHEAD; k++) preload(index + k);
   if (BROWSE) for (let k = 1; k <= KEEP_BEHIND; k++) preload(index - k);
@@ -273,6 +274,22 @@ function updateBar() {
   }
   starEl.textContent = item.starred ? '★' : '';
   nameEl.textContent = item.folder + ' / ' + item.name;
+}
+
+// Browse mode keeps the current photo in the URL (?at=...) so a reload or a
+// reopened tab resumes in place. Filenames suffice within one folder; the
+// starred view spans folders, so it uses full paths.
+const placeKey = p => BROWSE_STARRED ? p.path : p.name;
+let placeTimer;
+
+function rememberPlace(item) {
+  // Debounced: Safari throws if replaceState is called too often.
+  clearTimeout(placeTimer);
+  placeTimer = setTimeout(() => {
+    const url = new URL(location.href);
+    url.searchParams.set('at', placeKey(item));
+    try { history.replaceState(null, '', url); } catch (e) {}
+  }, 300);
 }
 
 function step(delta) {
@@ -450,6 +467,9 @@ async function loadQueue() {
   const data = await res.json();
   queue = data.photos;
   index = 0;
+  if (BROWSE && PARAMS.has('at')) {
+    index = Math.max(0, queue.findIndex(p => placeKey(p) === PARAMS.get('at')));
+  }
   cache.clear();
   show();
 }

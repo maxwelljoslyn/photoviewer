@@ -51,6 +51,10 @@ filename order with the same preloading, zoom and EXIF overlay.
 | `S`     | Star / unstar the photo                      |
 | `T`     | Toggle the thumbnail strip                   |
 
+The URL tracks the current photo (`&at=<filename>`), so reloading or reopening
+the tab resumes where you were; the home page links always start at the first
+photo.
+
 The other zoom/EXIF keys work as in review mode. Only folders inside a queued
 folder can be browsed, so keep a folder queued if you want to browse its
 results later.
